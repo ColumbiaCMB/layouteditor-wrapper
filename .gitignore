@@ -52,3 +52,6 @@ docs/_build/
 
 # PyBuilder
 target/
+
+# Ignore pylayout-specific softlinks to necessary packages; the .so extension is listed above.
+PyQt4

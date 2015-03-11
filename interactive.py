@@ -11,29 +11,8 @@
 
 import sys
 import IPython
-
+# These imports are currently done using softlinks to the versions distributed with pylayout.
 import pylayout
-import PyQt4
-"""
-try:
-    import pylayout
-    import PyQt4
-except ImportError:
-    import os, site
-
-    newpath = os.environ['PATH']
-    try:
-        sitepack = site.getsipackages()
-        for item in sitepack:
-            newpath = item + "\\layout" + newpath
-            newpath = item + "" + newpath
-    except:
-        print "site package path not found"
-    newpath = os.getcwd() + "\\layout" + newpath
-    os.putenv("PATH", newpath)
-    import pylayout
-    import PyQt4
-"""
 from PyQt4 import QtCore, QtGui
 
 global pyLayoutNewWin
@@ -132,6 +111,7 @@ class layoutWindow(QtCore.QObject):
 
 
 def main():
+    import interface
     app = QtGui.QApplication(sys.argv)
     app.quitOnLastWindowClosed = True
     pixmap = QtGui.QPixmap(":/splash")
@@ -143,6 +123,9 @@ def main():
     layout = win.l
     splashscreen.finish(layout)
     layout.show()
+
+    # Create a Drawing object
+    drawing = interface.Drawing(layout.drawing)
 
     # Create a clean scope.
     def clean_execfile(filename):

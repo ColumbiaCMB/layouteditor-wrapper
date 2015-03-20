@@ -265,6 +265,26 @@ class Cell(object):
         pl_polygon = self.pl_cell.addPolygon(self.drawing._to_point_array(points), int(layer))
         return Polygon(pl_polygon, self.drawing)
 
+    def add_polygon_arc(self, center, inner_radius, outer_radius, layer, start_angle=0, stop_angle=0):
+        """
+        Add a polygon in the shape of a full or partial annulus to this cell and return the corresponding object. The
+        default start and stop angles create an arc that touches itself, forming a full annulus. The angles are taken
+        mod 360, so it is not possible to create a polygon that overlaps itself.
+
+        :param center: a point containing the (x, y) coordinates of the circle center.
+        :param inner_radius: the inner radius of the arc.
+        :param outer_radius: the outer radius of the arc.
+        :param layer: the layer on which the arc is created.
+        :param start_angle: the start angle, measured counterclockwise from the x-axis.
+        :param stop_angle: the stop angle, measured counterclockwise from the x-axis.
+        :return: a Polygon object.
+        """
+        pl_polygon = self.pl_cell.addPolygonArc(self.drawing._np_to_pyqt(self.drawing._to_np_point(center)),
+                                                self.drawing.to_database_units(inner_radius),
+                                                self.drawing.to_database_units(outer_radius),
+                                                float(start_angle), float(stop_angle), int(layer))
+        return Polygon(pl_polygon, self.drawing)
+
     def add_path(self, points, layer, width=None, cap=None):
         """
         Add a path to this cell and return the corresponding object. A path may be closed or open.

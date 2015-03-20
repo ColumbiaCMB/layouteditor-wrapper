@@ -12,6 +12,9 @@ using this interface will generate multiple Cell objects that refer to the same 
 problems since the Cell and Element objects do not mirror the state of the corresponding pylayout objects.
 
 Variables representing pylayout classes always have pl_ as a prefix.
+
+In method docstrings the word *point* refers to a point with two coordinates. The classes use numpy arrays with shape
+(2,) internally, but methods should accept anything that allows point[0] and point[1] to be indexed, such as a tuple.
 """
 from __future__ import division
 from collections import OrderedDict
@@ -55,35 +58,55 @@ class Drawing(object):
     def user_unit(self, unit):
         self.pl_drawing.userunits = unit
 
-    def to_database_units(self, array):
-        if self.use_user_unit:
-            return np.round(array / self.user_unit).astype(np.float)
-        else:
-            return np.round(array).astype(np.int)
+    def to_database_units(self, value_or_array):
+        """
+        Convert the given value or array to the database units. The behavior of this function depends on the value of
+        the attribute use_user_unit in the following way: if this is True, then this function expects values in user
+        units, which are scaled appropriately and rounded to the nearest integer; if False, this function expects
+        values in database units, which are simply rounded to the nearest integer. The return value is always an int or
+        a np.array of ints.
 
-    def from_database_units(self, array):
-        if self.use_user_unit:
-            return (array * self.user_unit).astype(np.float)
-        else:
-            return array.astype(np.int)
+        :param value_or_array: a value or array to be converted to integer database units.
+        :return: the converted int or int array.
+        """
+        try:
+            if self.use_user_unit:
+                return np.round(value_or_array / self.user_unit).astype(np.int)
+            else:
+                return np.round(value_or_array).astype(np.int)
+        except AttributeError:  # not an array-like object
+            if self.use_user_unit:
+                return int(round(value_or_array / self.user_unit))
+            else:
+                return int(value_or_array)
+
+    def from_database_units(self, value_or_array):
+        try:
+            if self.use_user_unit:
+                return (value_or_array * self.user_unit).astype(np.float)
+            else:
+                return value_or_array.astype(np.int)
+        except AttributeError:
+            if self.use_user_unit:
+                return float(value_or_array * self.user_unit)
+            else:
+                return int(value_or_array)
 
     @property
     def cells(self):
         """
-        New cells are prepended to the internal linked list, so the index of each cell will change as new cells are
-        added. Since cell names must be unique, using an OrderedDict allows access by index or by name.
+        Cells are uniquely specified by their name. New cells are prepended to the internal linked list, so the index of
+        a cell will change as new cells are added.
 
         :return: an OrderedDict of all cells in the drawing, with cell name keys and Cell object values.
         """
-        return self._parse_cell_linked_list(self.pl_drawing.firstCell, OrderedDict())
-
-    def _parse_cell_linked_list(self, current, cell_dict):
-        if current is not None:
+        cell_dict = OrderedDict()
+        current = self.pl_drawing.firstCell
+        while current is not None:
             cell = Cell(current.thisCell, self)
             cell_dict[cell.name] = cell
-            return self._parse_cell_linked_list(current.nextCell, cell_dict)
-        else:
-            return cell_dict
+            current = current.nextCell
+        return cell_dict
 
     def _to_np_point(self, indexable):
         return np.array([indexable[0], indexable[1]])  #, dtype={True: np.float, False: np.int}[self.use_user_unit])
@@ -114,9 +137,15 @@ class Drawing(object):
         return array_list
 
     def add_cell(self, name=None):
+        if name in self.cells:
+            raise ValueError("Cell name already exists.")
+        if name is None or not name:
+            for n in range(1, len(self.cells) + 2):
+                name = "noname_{}".format(n)
+                if name not in self.cells:
+                    break
         pl_cell = self.pl_drawing.addCell().thisCell
-        if name is not None:
-            pl_cell.cellName = name
+        pl_cell.cellName = name
         return Cell(pl_cell, self)
 
 
@@ -131,6 +160,8 @@ class Cell(object):
 
     @name.setter
     def name(self, name):
+        if name != self.name and name in self.drawing.cells:
+            raise ValueError("Cell name already exists.")
         self.pl_cell.cellName = str(name)
 
     @property
@@ -144,23 +175,39 @@ class Cell(object):
 
         :return: a list of Element objects in this Cell.
         """
-        return self._parse_element_linked_list(self.pl_cell.firstElement, [])
-
-    def _parse_element_linked_list(self, current, element_list):
-        if current is not None:
+        element_list = []
+        current = self.pl_cell.firstElement
+        while current is not None:
             element_list.append(instantiate_element(current.thisElement, self.drawing))
-            return self._parse_element_linked_list(current.nextElement, element_list)
-        else:
-            return element_list
+            current = current.nextElement
+        return element_list
 
     def __str__(self):
         return 'Cell {}: {}'.format(self.name, [str(e) for e in self.elements])
 
-    def add_cell(self, cell, x, y):
-        pl_cell = self.pl_cell.addCellref(cell.pl_cell, self.drawing._np_to_pyqt(x, y))
+    def add_cell(self, cell, origin):
+        """
+        Add a single cell to this cell.
+
+        :param cell: the Cell object to add to this cell.
+        :param origin: a point containing the origin x- and y-coordinates.
+        :return: a Cellref object with a reference to the given Cell.
+        """
+        pl_cell = self.pl_cell.addCellref(cell.pl_cell, self.drawing._np_to_pyqt(self.drawing._to_np_point(origin)))
         return Cellref(pl_cell, self.drawing)
 
-    def add_cell_array(self, cell, origin=(0, 0), step_x=(0, 0), step_y=(0, 0), repeat_x=1, repeat_y=1):
+    def add_cell_array(self, cell, origin, step_x=(0, 0), step_y=(0, 0), repeat_x=1, repeat_y=1):
+        """
+        Add an array of cells to this cell.
+
+        :param cell: the Cell object to add to this cell.
+        :param origin: a point containing the origin x- and y-coordinates.
+        :param step_x: a point containing the x- and y-increment for all cells in each row.
+        :param step_y: a point containing the x- and y-increment for all cells in each column.
+        :param repeat_x: the number of columns.
+        :params repeat_y: the number of rows.
+        :return: a CellrefArray object with a reference to the given Cell.
+        """
         repeat_x = int(repeat_x)
         repeat_y = int(repeat_y)
         # Horrible, but true: the constructor for this object expects three points that are different from both the
@@ -173,6 +220,16 @@ class Cell(object):
         return CellrefArray(pl_cell_array, self.drawing)
 
     def add_box(self, x, y, width, height, layer):
+        """
+        Add a rectanglular box to this cell and return the corresponding object.
+
+        :param x: the x-coordinate of the origin.
+        :param y: the y-coordinate of the origin.
+        :param width: the horizontal width of the box, positive if the box is to extend to the right from the origin.
+        :param width: the vertical height of the box, positive if the box is to extend upward from the origin.
+        :param layer: the layer on which the box is created.
+        :return: a Box object.
+        """
         pl_box = self.pl_cell.addBox(self.drawing.to_database_units(x),
                                      self.drawing.to_database_units(y),
                                      self.drawing.to_database_units(width),
@@ -180,24 +237,66 @@ class Cell(object):
                                      int(layer))
         return Box(pl_box, self.drawing)
 
-    def add_circle(self, x, y, radius, layer, number_of_points=0):
-        pl_circle = self.pl_cell.addCircle(int(layer), self.drawing._np_to_pyqt((x, y)),
+    def add_circle(self, origin, radius, layer, number_of_points=0):
+        """
+        Add a circular polygon to this cell and return the corresponding object. Note that pylayout considers any
+        regular polygon with 8 or more points to be a circle, and once created a circle has no special properties.
+
+        :param origin: a point containing the (x, y) coordinates of the circle center.
+        :param radius: the circle radius.
+        :param layer: the layer on which the circle is created.
+        :param number_of_points: the number of unique points to use in creating the circle; the default of 0 uses the
+        current pylayout default.
+        :return: a Circle object.
+        """
+        pl_circle = self.pl_cell.addCircle(int(layer), self.drawing._np_to_pyqt(self.drawing._to_np_point(origin)),
                                            self.drawing.to_database_units(radius), int(number_of_points))
         return Circle(pl_circle, self.drawing)
 
     def add_polygon(self, points, layer):
+        """
+        Add a polygon to this cell and return the corresponding object. If the given list of points does not close,
+        pylayout will automatically add the first point to the end of the point list in order to close it.
+
+        :param points: an iterable of points that are the vertices of the polygon.
+        :param layer: the layer on which the polygon is created.
+        :return: a Polygon object.
+        """
         pl_polygon = self.pl_cell.addPolygon(self.drawing._to_point_array(points), int(layer))
         return Polygon(pl_polygon, self.drawing)
 
-    def add_path(self, points, layer, width=None):
+    def add_path(self, points, layer, width=None, cap=None):
+        """
+        Add a path to this cell and return the corresponding object. A path may be closed or open.
+
+        :param points: an iterable of points that are the vertices of the path.
+        :param layer: the layer on which the path is created.
+        :param width: the width of the path.
+        :param cap: the cap style of the path; the default of None will create a path with the current default cap.
+        :return: a Path object.
+        """
         pl_path = self.pl_cell.addPath(self.drawing._to_point_array(points), int(layer))
         path = Path(pl_path, self.drawing)
         if width is not None:
-            path.width = width
+            path.width = float(width)
+        if cap is not None:
+            path.cap = int(cap)
         return path
 
-    def add_text(self, x, y, text, layer, height=None):
-        pl_text = self.pl_cell.addText(int(layer), self.drawing._np_to_pyqt((x, y)), str(text))
+    def add_text(self, origin, text, layer, height=None):
+        """
+        Add text to this cell and return the corresponding object.
+
+        :param origin: a point representing the origin of the text object, which appears to be to the upper left of
+        where the text begins.
+        :param text: a string representing the text to be displayed.
+        :param layer: the layer on which the text is created.
+        :param height: the height of the text; positive values are interpreted as user units, negative values create
+        a fixed height in pixels, and the default uses the current default.
+        :return: a Text object.
+        """
+        pl_text = self.pl_cell.addText(int(layer), self.drawing._np_to_pyqt(self.drawing._to_np_point(origin)),
+                                       str(text))
         text_ = Text(pl_text, self.drawing)
         if height is not None:
             text_.height = height
@@ -212,7 +311,6 @@ def instantiate_element(pl_element, drawing):
     raise ValueError("Unknown pylayout element.")
 
 
-# TODO: implement setter for points.
 # TODO: think about using a reference to the parent cell instead of to the drawing.
 class Element(object):
 
@@ -312,31 +410,21 @@ class CellElement(Element):
 class Cellref(CellElement):
 
     def __str__(self):
-        return 'Cell {}'.format(self.cell.name)
+        return 'Cell {} at ({:.3f}, {:.3f})'.format(self.cell.name, self.origin[0], self.origin[1])
 
     @property
-    def x(self):
-        x, y = self.points[0]
-        return x
+    def origin(self):
+        return self.points[0]
 
-    @x.setter
-    def x(self, x):
-        self.points = [(x, self.y)]
-
-    @property
-    def y(self):
-        x, y = self.points[0]
-        return y
-
-    @y.setter
-    def y(self, y):
-        self.points = [(self.x, y)]
+    @origin.setter
+    def origin(self, origin):
+        self.points = [self.drawing._to_np_point(origin)]
 
 
 class CellrefArray(CellElement):
 
     def __str__(self):
-        return 'Cell {}: {} {}x{}'.format(self.cell.name, self.points, self.repeat_x, self.repeat_y)
+        return 'Cell {}: {} {} by {}'.format(self.cell.name, self.points, self.repeat_x, self.repeat_y)
 
     @classmethod
     def _to_pylayout(cls, points):
@@ -426,7 +514,19 @@ class Box(LayerElement):
 
 
 class Circle(LayerElement):
-    pass
+    """
+    LayoutEditor considers any regular polygon with more than 8 points to be a circle.
+    """
+    @property
+    def center(self):
+        # The last point is always the same as the first.
+        x = np.mean([p[0] for p in self.points[:-1]])
+        y = np.mean([p[1] for p in self.points[:-1]])
+        return self.drawing.from_database_units(self.drawing.to_database_units(np.array([x, y])))
+
+    @property
+    def radius(self):
+        return np.sqrt(np.sum((self.points[0] - self.center)**2))
 
 
 class Path(LayerElement):
@@ -453,12 +553,13 @@ class Polygon(LayerElement):
 
 
 class Text(LayerElement):
+
+    def __str__(self):
+        return 'Text "{}" at ({:.3f}, {:.3f})'.format(self.text, self.origin[0], self.origin[1])
+
     @property
     def text(self):
         return self.pl_element.getName().toAscii().data()
-
-    def __str__(self):
-        return 'Text: {}'.format(self.text)
 
     @text.setter
     def text(self, text):
@@ -466,30 +567,16 @@ class Text(LayerElement):
 
     @property
     def height(self):
-        return self.pl_element.getWidth()
+        return self.drawing.from_database_units(self.pl_element.getWidth())
 
     @height.setter
     def height(self, height):
         self.pl_element.setWidth(self.drawing.to_database_units(height))
 
     @property
-    def x(self):
-        x, y = self.points[0]
-        return x
+    def origin(self):
+        return self.points[0]
 
-    @x.setter
-    def x(self, x):
-        self.points = [(x, self.y)]
-
-    @property
-    def y(self):
-        x, y = self.points[0]
-        return y
-
-    @y.setter
-    def y(self, y):
-        self.points = [(self.x, y)]
-
-
-
-
+    @origin.setter
+    def origin(self, origin):
+        self.points = [self.drawing._to_np_point(origin)]

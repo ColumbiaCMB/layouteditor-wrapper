@@ -137,12 +137,15 @@ class Drawing(object):
         return array_list
 
     def add_cell(self, name=None):
-        if name in self.cells:
-            raise ValueError("Cell name already exists.")
+        #if name in self.cells:
+        #    raise ValueError("Cell name already exists.")
         if name is None or not name:
+            name = 'noname'
+        if name in self.cells:
             for n in range(1, len(self.cells) + 2):
-                name = "noname_{}".format(n)
-                if name not in self.cells:
+                new_name = name+"_{}".format(n)
+                if new_name not in self.cells:
+                    name = new_name
                     break
         pl_cell = self.pl_drawing.addCell().thisCell
         pl_cell.cellName = name

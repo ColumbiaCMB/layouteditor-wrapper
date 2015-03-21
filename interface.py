@@ -196,7 +196,7 @@ class Cell(object):
         pl_cell = self.pl_cell.addCellref(cell.pl_cell, self.drawing._np_to_pyqt(self.drawing._to_np_point(origin)))
         return Cellref(pl_cell, self.drawing)
 
-    def add_cell_array(self, cell, origin, step_x=(0, 0), step_y=(0, 0), repeat_x=1, repeat_y=1):
+    def add_cell_array(self, cell, origin=(0,0), step_x=(0, 0), step_y=(0, 0), repeat_x=1, repeat_y=1):
         """
         Add an array of cells to this cell.
 

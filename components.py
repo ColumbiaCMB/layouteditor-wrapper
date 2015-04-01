@@ -89,33 +89,32 @@ def double_meander(drawing, length, spacing, width, turns, layer, cell_name=None
         cell_name = 'double_meander_{:.3f}_{:.3f}_{:.3f}_{:.0f}_{:.0f}'.format(length, spacing, width, turns, layer)
 
     cell = drawing.add_cell(cell_name)
-    start = [np.array([width / 2, width / 2 + width + spacing])]
-    end = [np.array([width / 2 + width + spacing, width / 2])]
+    out = [np.array([width / 2, width / 2 + width + spacing])]
+    back = [np.array([width / 2 + width + spacing, width / 2])]
     horizontal = width + spacing
     vertical = (length - width) - horizontal
     for turn in range(turns):
         if turn % 2:
-            start.append(start[-1] + np.array([0, -vertical]))
-            end.append(end[-1] + np.array([0, -vertical]))
-            start.append(start[-1] + np.array([horizontal, 0]))
-            end.append(end[-1] + np.array([3 * horizontal, 0]))
+            out.append(out[-1] + np.array([0, -vertical]))
+            back.append(back[-1] + np.array([0, -vertical]))
+            out.append(out[-1] + np.array([horizontal, 0]))
+            back.append(back[-1] + np.array([3 * horizontal, 0]))
         else:
-            start.append(start[-1] + np.array([0, vertical]))
-            end.append(end[-1] + np.array([0, vertical]))
-            start.append(start[-1] + np.array([3 * horizontal, 0]))
-            end.append(end[-1] + np.array([horizontal, 0]))
+            out.append(out[-1] + np.array([0, vertical]))
+            back.append(back[-1] + np.array([0, vertical]))
+            out.append(out[-1] + np.array([3 * horizontal, 0]))
+            back.append(back[-1] + np.array([horizontal, 0]))
     # Fix the first point.
-    start[0] = np.array([width / 2, width / 2])
+    out[0] = np.array([width / 2, width / 2])
     # Delete the last horizontal connection and close the loop.
-    start.pop()
-    end.pop()
+    out.pop()
+    back.pop()
     if turns % 2:
-        end[-1] = np.array([end[-1][0], start[-1][1]])
+        back[-1] = np.array([back[-1][0], out[-1][1]])
     else:
-        start[-1] = np.array([start[-1][0], end[-1][1]])
-    for point in reversed(end):
-        start.append(point)
-    cell.add_path(start, int(layer), width=width, cap=2)
+        out[-1] = np.array([out[-1][0], back[-1][1]])
+    out.extend(reversed(back))
+    cell.add_path(out, int(layer), width=width, cap=2)
     return cell
 
 

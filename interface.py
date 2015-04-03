@@ -24,7 +24,7 @@ import pylayout
 
 class Drawing(object):
 
-    def __init__(self, pl_drawing, use_user_unit=True):
+    def __init__(self, pl_drawing, use_user_unit=True, auto_number=False):
         """
         :param drawing: a pylayout.drawing instance.
         :param use_user_unit: a boolean that determines whether all values input to and returned from classes in this
@@ -34,6 +34,9 @@ class Drawing(object):
         """
         self.pl_drawing = pl_drawing
         self.use_user_unit = use_user_unit
+        self.auto_number = auto_number
+        if auto_number:
+            self._cell_number = 0
 
     @property
     def database_unit(self):
@@ -100,12 +103,16 @@ class Drawing(object):
 
         :return: an OrderedDict of all cells in the drawing, with cell name keys and Cell object values.
         """
+        n_cells = 0
         cell_dict = OrderedDict()
         current = self.pl_drawing.firstCell
         while current is not None:
             cell = Cell(current.thisCell, self)
             cell_dict[cell.name] = cell
+            n_cells += 1
             current = current.nextCell
+        if n_cells != len(cell_dict):
+            raise RuntimeError("Duplicate cell name.")
         return cell_dict
 
     def _to_np_point(self, indexable):
@@ -136,17 +143,10 @@ class Drawing(object):
             array_list.append(self._pyqt_to_np(point_array.point(i)))
         return array_list
 
-    def add_cell(self, name=None):
-        #if name in self.cells:
-        #    raise ValueError("Cell name already exists.")
-        if name is None or not name:
-            name = 'noname'
-        if name in self.cells:
-            for n in range(1, len(self.cells) + 2):
-                new_name = name+"_{}".format(n)
-                if new_name not in self.cells:
-                    name = new_name
-                    break
+    def add_cell(self, name):
+        if self.auto_number:
+            name = '{}_{}'.format(name, self._cell_number)
+            self._cell_number += 1
         pl_cell = self.pl_drawing.addCell().thisCell
         pl_cell.cellName = name
         return Cell(pl_cell, self)

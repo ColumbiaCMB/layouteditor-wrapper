@@ -131,6 +131,11 @@ def main():
     def clean_execfile(filename):
         execfile(filename, {'layout': layout})
 
+    def show_latest():
+        layout.drawing.currentCell = layout.drawing.firstCell.thisCell
+        layout.guiUpdate()
+        layout.drawing.scaleFull()
+
     # The next line prevents the function from exiting until the IPython session is ended, so exec_() is unnecessary and
     # actually will cause the IPython session to hang if it is closed before the window is closed.
     IPython.embed()

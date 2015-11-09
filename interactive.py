@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 # ####################################################################
 #
@@ -9,11 +8,15 @@
 #
 #####################################################################
 
+# The pylayout software, which is called pylayout_current here, is distributed with versions of PyQt4 and sip. It
+# seems to need these exact versions to run. This module is a template that can be executed from a project
+# directory and modified to speed design. See README.md for instructions on getting the imports below to work correctly.
 import sys
 import IPython
-# These imports are currently done using softlinks to the versions distributed with pylayout.
-import pylayout
+import pylayout_current
+sys.path.insert(0, pylayout_current.__path__[0])
 from PyQt4 import QtCore, QtGui
+from pylayout_current import pylayout
 
 global pyLayoutNewWin
 pyLayoutNewWin = {}
@@ -111,15 +114,14 @@ class layoutWindow(QtCore.QObject):
 
 
 def main():
-    import interface
+    from layouteditor import interface
     app = QtGui.QApplication(sys.argv)
     app.quitOnLastWindowClosed = True
     pixmap = QtGui.QPixmap(":/splash")
     splashscreen = pylayout.splash(pixmap)
     splashscreen.show()
-    #win = layoutWindow("text")
+
     win = layoutWindow("layoutFull")
-    #win = layoutWindow("schematic")
     layout = win.l
     splashscreen.finish(layout)
     layout.show()
@@ -139,7 +141,7 @@ def main():
     # The next line prevents the function from exiting until the IPython session is ended, so exec_() is unnecessary and
     # actually will cause the IPython session to hang if it is closed before the window is closed.
     IPython.embed()
-    #sys.exit(app.exec_())
+
 
 if __name__ == '__main__':
     main()

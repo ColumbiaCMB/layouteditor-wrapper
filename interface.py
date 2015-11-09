@@ -19,7 +19,29 @@ In method docstrings the word *point* refers to a point with two coordinates. Th
 from __future__ import division
 from collections import OrderedDict
 import numpy as np
-import pylayout
+from pylayout_current import pylayout
+
+
+# The two following simple functions are available to code that uses (lists of) numpy arrays as points.
+# This makes it easy for methods to accept lists of tuples, for example.
+def to_point(indexable):
+    """
+    Return a numpy array in the two-dimensional point format used by this module.
+
+    :param indexable: an indexable object with integer indices 0 and 1
+    :return: a numpy array with shape (2,) containing the values at these two indices.
+    """
+    return np.array([indexable[0], indexable[1]])
+
+
+def to_point_list(iterable):
+    """
+    Return a list of numpy arrays in the two-dimensional point format used by this module.
+
+    :param iterable: an iterable of indexable objects that all have integer indices 0 and 1.
+    :return: a list of numpy arrays with shape (2,) containing the values at these two indices.
+    """
+    return [to_point(point) for point in iterable]
 
 
 class Drawing(object):
@@ -89,7 +111,7 @@ class Drawing(object):
                 return (value_or_array * self.user_unit).astype(np.float)
             else:
                 return value_or_array.astype(np.int)
-        except AttributeError:
+        except AttributeError:  # not an array-like object
             if self.use_user_unit:
                 return float(value_or_array * self.user_unit)
             else:
@@ -115,12 +137,9 @@ class Drawing(object):
             raise RuntimeError("Duplicate cell name.")
         return cell_dict
 
-    def _to_np_point(self, indexable):
-        return np.array([indexable[0], indexable[1]])  #, dtype={True: np.float, False: np.int}[self.use_user_unit])
-
     def _np_to_pyqt(self, array):
         """
-        Create a point without adding the point to the drawing and scale the coordinates to the database units.
+        Create a point (without adding it to the drawing) and scale the coordinates to the database units.
 
         :param array: a two-element numpy array containing the x- and y-coordinates of the point in either user units or
         database units; see __init__().
@@ -149,6 +168,9 @@ class Drawing(object):
             self._cell_number += 1
         pl_cell = self.pl_drawing.addCell().thisCell
         pl_cell.cellName = name
+        # Adding a cell does not update currentCell. Without the line below, boolean operations (and probably others)
+        #  will operate on currentCell instead of the cell created by this method.
+        self.pl_drawing.currentCell = pl_cell
         return Cell(pl_cell, self)
 
 
@@ -188,18 +210,21 @@ class Cell(object):
     def __str__(self):
         return 'Cell {}: {}'.format(self.name, [str(e) for e in self.elements])
 
-    def add_cell(self, cell, origin):
+    def add_cell(self, cell, origin, angle=0):
         """
         Add a single cell to this cell.
 
         :param cell: the Cell object to add to this cell.
         :param origin: a point containing the origin x- and y-coordinates.
+        :param angle: a float representing the cell orientation in degrees.
         :return: a Cellref object with a reference to the given Cell.
         """
-        pl_cell = self.pl_cell.addCellref(cell.pl_cell, self.drawing._np_to_pyqt(self.drawing._to_np_point(origin)))
-        return Cellref(pl_cell, self.drawing)
+        pl_cell = self.pl_cell.addCellref(cell.pl_cell, self.drawing._np_to_pyqt(to_point(origin)))
+        cell = Cellref(pl_cell, self.drawing)
+        cell.angle = angle
+        return cell
 
-    def add_cell_array(self, cell, origin=(0,0), step_x=(0, 0), step_y=(0, 0), repeat_x=1, repeat_y=1):
+    def add_cell_array(self, cell, origin=(0, 0), step_x=(0, 0), step_y=(0, 0), repeat_x=1, repeat_y=1, angle=0):
         """
         Add an array of cells to this cell.
 
@@ -209,18 +234,21 @@ class Cell(object):
         :param step_y: a point containing the x- and y-increment for all cells in each column.
         :param repeat_x: the number of columns.
         :params repeat_y: the number of rows.
+        :param angle: a float representing the cell orientation in degrees.
         :return: a CellrefArray object with a reference to the given Cell.
         """
         repeat_x = int(repeat_x)
         repeat_y = int(repeat_y)
-        # Horrible, but true: the constructor for this object expects three points that are different from both the
+        # Strange but true: the constructor for this object expects three points that are different from both the
         # points returned by getPoints() and the GUI interface points.
-        pl_origin = self.drawing._to_np_point(origin)
-        pl_total_x = repeat_x * self.drawing._to_np_point(step_x) + pl_origin
-        pl_total_y = repeat_y * self.drawing._to_np_point(step_y) + pl_origin
+        pl_origin = to_point(origin)
+        pl_total_x = repeat_x * to_point(step_x) + pl_origin
+        pl_total_y = repeat_y * to_point(step_y) + pl_origin
         point_array = self.drawing._to_point_array([pl_origin, pl_total_x, pl_total_y])
         pl_cell_array = self.pl_cell.addCellrefArray(cell.pl_cell, point_array, repeat_x, repeat_y)
-        return CellrefArray(pl_cell_array, self.drawing)
+        cell_array = CellrefArray(pl_cell_array, self.drawing)
+        cell_array.angle = angle
+        return cell_array
 
     def add_box(self, x, y, width, height, layer):
         """
@@ -252,7 +280,7 @@ class Cell(object):
         current pylayout default.
         :return: a Circle object.
         """
-        pl_circle = self.pl_cell.addCircle(int(layer), self.drawing._np_to_pyqt(self.drawing._to_np_point(origin)),
+        pl_circle = self.pl_cell.addCircle(int(layer), self.drawing._np_to_pyqt(to_point(origin)),
                                            self.drawing.to_database_units(radius), int(number_of_points))
         return Circle(pl_circle, self.drawing)
 
@@ -282,7 +310,7 @@ class Cell(object):
         :param stop_angle: the stop angle, measured counterclockwise from the x-axis.
         :return: a Polygon object.
         """
-        pl_polygon = self.pl_cell.addPolygonArc(self.drawing._np_to_pyqt(self.drawing._to_np_point(center)),
+        pl_polygon = self.pl_cell.addPolygonArc(self.drawing._np_to_pyqt(to_point(center)),
                                                 self.drawing.to_database_units(inner_radius),
                                                 self.drawing.to_database_units(outer_radius),
                                                 float(start_angle), float(stop_angle), int(layer))
@@ -318,7 +346,7 @@ class Cell(object):
         a fixed height in pixels, and the default uses the current default.
         :return: a Text object.
         """
-        pl_text = self.pl_cell.addText(int(layer), self.drawing._np_to_pyqt(self.drawing._to_np_point(origin)),
+        pl_text = self.pl_cell.addText(int(layer), self.drawing._np_to_pyqt(to_point(origin)),
                                        str(text))
         text_ = Text(pl_text, self.drawing)
         if height is not None:
@@ -403,24 +431,19 @@ class Element(object):
         self.pl_element.setTrans(transformation)
 
 
-# TODO: remove comments to enable the layer property after the next update.
 class LayerElement(Element):
     """
     This class is identical to Element except that it adds a layer property for Elements that exist on a single
     layer, which is all of them except for the Cellref and CellrefArray classes.
     """
-    pass
 
-    """
     @property
     def layer(self):
         return self.pl_element.layerNum
 
-    # Verify that this is settable
     @layer.setter
     def layer(self, layer):
         self.pl_element.layerNum = int(layer)
-    """
 
 
 class CellElement(Element):
@@ -441,9 +464,10 @@ class Cellref(CellElement):
 
     @origin.setter
     def origin(self, origin):
-        self.points = [self.drawing._to_np_point(origin)]
+        self.points = [to_point(origin)]
 
 
+# TODO: should these class methods be static methods?
 class CellrefArray(CellElement):
 
     def __str__(self):
@@ -473,7 +497,7 @@ class CellrefArray(CellElement):
 
     @origin.setter
     def origin(self, origin):
-        self.points = [self.drawing._to_np_point(origin), self.points[1], self.points[2]]
+        self.points = [to_point(origin), self.points[1], self.points[2]]
 
     @property
     def step_x(self):
@@ -481,7 +505,7 @@ class CellrefArray(CellElement):
 
     @step_x.setter
     def step_x(self, step_x):
-        self.points = [self.points[0], self.drawing._to_np_point(step_x), self.points[2]]
+        self.points = [self.points[0], to_point(step_x), self.points[2]]
 
     @property
     def step_y(self):
@@ -489,7 +513,7 @@ class CellrefArray(CellElement):
 
     @step_y.setter
     def step_y(self, step_y):
-        self.points = [self.points[0], self.points[1], self.drawing._to_np_point(step_y)]
+        self.points = [self.points[0], self.points[1], to_point(step_y)]
 
     @property
     def repeat_x(self):
@@ -602,4 +626,4 @@ class Text(LayerElement):
 
     @origin.setter
     def origin(self, origin):
-        self.points = [self.drawing._to_np_point(origin)]
+        self.points = [to_point(origin)]

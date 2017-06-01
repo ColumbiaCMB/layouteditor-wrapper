@@ -210,6 +210,26 @@ class Cell(object):
     def __str__(self):
         return 'Cell {}: {}'.format(self.name, [str(e) for e in self.elements])
 
+    def invert(self, outline_layer, negative_layer, positive_layer, delete=True):
+        """
+        Perform the boolean operation
+        outline - negative = positive
+        one the given layers.
+
+        :param drawing:
+        :param positive_layer:
+        :param outline_layer:
+        :param negative_layer:
+        :param delete:
+        :return:
+        """
+        self.drawing.pl_drawing.setCell(self.pl_cell)
+        bh = pylayout.booleanHandler(self.drawing.pl_drawing)
+        bh.boolOnLayer(outline_layer, negative_layer, positive_layer, pylayout.string('A-B'), 0, 0, 0)
+        if delete:
+            self.drawing.pl_drawing.deleteLayer(outline_layer)
+            self.drawing.pl_drawing.deleteLayer(negative_layer)
+
     def add_cell(self, cell, origin, angle=0):
         """
         Add a single cell to this cell.

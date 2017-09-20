@@ -18,12 +18,14 @@ In method docstrings the word *point* refers to a point with two coordinates. Th
 """
 from __future__ import division
 from collections import OrderedDict
+
 import numpy as np
 from pylayout_current import pylayout
 
 
 # The two following simple functions are available to code that uses (lists of) numpy arrays as points.
 # This makes it easy for methods to accept lists of tuples, for example.
+
 def to_point(indexable):
     """
     Return a numpy array in the two-dimensional point format used by this module.
@@ -45,7 +47,6 @@ def to_point_list(iterable):
 
 
 class Drawing(object):
-
     def __init__(self, pl_drawing, use_user_unit=True, auto_number=False):
         """
         :param drawing: a pylayout.drawing instance.
@@ -210,24 +211,23 @@ class Cell(object):
     def __str__(self):
         return 'Cell {}: {}'.format(self.name, [str(e) for e in self.elements])
 
-    def invert(self, outline_layer, negative_layer, positive_layer, delete=True):
+    def subtract(self, positive_layer, negative_layer, result_layer, delete=True):
         """
         Perform the boolean operation
-        outline - negative = positive
-        one the given layers.
+        positive - negative = result
+        on the given layers.
 
-        :param drawing:
-        :param positive_layer:
-        :param outline_layer:
-        :param negative_layer:
-        :param delete:
-        :return:
+        :param positive_layer: Structures on this layer remain unless subtracted.
+        :param negative_layer: Structures on this layer are subtracted from the positive layer.
+        :param result_layer: The structures resulting from the subtraction are created on this layer.
+        :param delete: if True, delete all structures on the positive and negative layers after the subtraction.
+        :return: None
         """
         self.drawing.pl_drawing.setCell(self.pl_cell)
         bh = pylayout.booleanHandler(self.drawing.pl_drawing)
-        bh.boolOnLayer(outline_layer, negative_layer, positive_layer, pylayout.string('A-B'), 0, 0, 0)
+        bh.boolOnLayer(positive_layer, negative_layer, result_layer, pylayout.string('A-B'), 0, 0, 0)
         if delete:
-            self.drawing.pl_drawing.deleteLayer(outline_layer)
+            self.drawing.pl_drawing.deleteLayer(positive_layer)
             self.drawing.pl_drawing.deleteLayer(negative_layer)
 
     def add_cell(self, cell, origin, angle=0):
@@ -384,7 +384,6 @@ def instantiate_element(pl_element, drawing):
 
 # TODO: think about using a reference to the parent cell instead of to the drawing.
 class Element(object):
-
     def __init__(self, pl_element, drawing):
         self.pl_element = pl_element
         self.drawing = drawing
@@ -467,14 +466,12 @@ class LayerElement(Element):
 
 
 class CellElement(Element):
-
     def __init__(self, pl_element, drawing):
         super(CellElement, self).__init__(pl_element, drawing)
         self.cell = Cell(pl_element.depend(), drawing)
 
 
 class Cellref(CellElement):
-
     def __str__(self):
         return 'Cell {} at ({:.3f}, {:.3f})'.format(self.cell.name, self.origin[0], self.origin[1])
 
@@ -489,7 +486,6 @@ class Cellref(CellElement):
 
 # TODO: should these class methods be static methods?
 class CellrefArray(CellElement):
-
     def __str__(self):
         return 'Cell {}: {} {} by {}'.format(self.cell.name, self.points, self.repeat_x, self.repeat_y)
 
@@ -553,7 +549,6 @@ class CellrefArray(CellElement):
 
 
 class Box(LayerElement):
-
     @property
     def _points(self):
         (x_upper_left, y_upper_left), (x_lower_right, y_lower_right) = self.points
@@ -584,6 +579,7 @@ class Circle(LayerElement):
     """
     LayoutEditor considers any regular polygon with more than 8 points to be a circle.
     """
+
     @property
     def center(self):
         # The last point is always the same as the first.
@@ -593,11 +589,10 @@ class Circle(LayerElement):
 
     @property
     def radius(self):
-        return np.sqrt(np.sum((self.points[0] - self.center)**2))
+        return np.sqrt(np.sum((self.points[0] - self.center) ** 2))
 
 
 class Path(LayerElement):
-
     @property
     def width(self):
         return self.pl_element.getWidth()
@@ -620,7 +615,6 @@ class Polygon(LayerElement):
 
 
 class Text(LayerElement):
-
     def __str__(self):
         return 'Text "{}" at ({:.3f}, {:.3f})'.format(self.text, self.origin[0], self.origin[1])
 

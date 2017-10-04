@@ -1,7 +1,7 @@
 from __future__ import division
 import numpy as np
 # This should be from layouteditor import interface, but that doesn't resolve currently.
-import interface
+import wrapper
 
 def interdigitated_capacitor(drawing, space, length, width, base, offset, turns, layer, cell_name=None):
     """

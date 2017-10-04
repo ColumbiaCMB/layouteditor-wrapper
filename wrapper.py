@@ -1,30 +1,40 @@
 """
-This module is an interface to pylayout.
+This module is a wrapper for pylayout, the Python module of LayoutEditor.
 
-The goal is to make design simpler. Where possible, this interface uses the same conventions and notation as the
-LayoutEditor GUI, which are often different from those used by pylayout. I think the GUI conventions are usually
-easier to use. For example, this interface by default uses the user unit, like the GUI, but can also use the integer
-database units, like pylayout.
+This module includes several types of objects that each wrap a pylayout object. The naming conventions for pylayout
+objects are the following: in methods and functions, pylayout objects have a pyl_ prefix; as attributes of wrapper
+classes, the attribute .pyl is the wrapped object. For example, the constructor for Cell includes pyl_cell,
+which is a pylayout.cell object; also, if cell is a wrapper.Cell object, then cell.pyl is the underlying pylayout.cell
+object.
 
-To avoid state mismatch issues, the classes created by this interface are nearly stateless. For example, every call
-to drawing.cells generates a new list of Cell objects directly from the pylayout objects. The downside is that code
-using this interface will generate multiple Cell objects that refer to the same pylayout cell. This should not cause
-problems since the Cell and Element objects do not mirror the state of the corresponding pylayout objects.
+Where possible, the classes use the same conventions and notation as the LayoutEditor GUI, which are often different
+from those used by pylayout. I think the GUI conventions are usually easier to use. For example, this interface by
+default uses the user unit, like the GUI, but can also use the integer database units, like pylayout.
 
-Variables representing pylayout classes always have pl_ as a prefix.
+The classes representing the objects in a drawing are nearly stateless wrappers for the underlying pylayout objects.
+For example, every call to drawing.cells generates a new list of Cell objects. Since the wrappers store no state,
+there is no need for them to be unique. These can be cached for speed, if necessary.
 
 In method docstrings the word *point* refers to a point with two coordinates. The classes use numpy arrays with shape
 (2,) internally, but methods should accept anything that allows point[0] and point[1] to be indexed, such as a tuple.
 """
 from __future__ import division
+import sys
 from collections import OrderedDict
 
 import numpy as np
-from pylayout_current import pylayout
-
+# These shenanigans ensure that the bundled PyQt4 and sip are imported instead of any newer versions.
+# For this to work, the distributed pylayout directory should be available on the PYTHONPATH as pylayout and must be
+# made into a valid package by adding an __init__.py file.
+import pylayout
+sys.path.insert(0, pylayout.__path__[0])
+from PyQt4 import QtCore, QtGui
+from pylayout import pylayout
+sys.path.pop(0)
 
 # The two following simple functions are available to code that uses (lists of) numpy arrays as points.
 # This makes it easy for methods to accept lists of tuples, for example.
+
 
 def to_point(indexable):
     """
@@ -46,16 +56,67 @@ def to_point_list(iterable):
     return [to_point(point) for point in iterable]
 
 
-class Drawing(object):
-    def __init__(self, pl_drawing, use_user_unit=True, auto_number=False):
+def instantiate_element(pyl_element, drawing):
+    """
+    Instantiate the appropriate wrapper class for the given pylayout element type.
+
+    :param pyl_element: a pylayout element object.
+    :param drawing: a Drawing object.
+    :return: a wrapper instance for the pylayout element.
+    """
+    elements = (Box, Cellref, CellrefArray, Circle, Path, Polygon, Text)
+    for element in elements:
+        if getattr(pyl_element, 'is' + element.__name__)():
+            return element(pyl_element, drawing)
+    raise ValueError("Unknown pylayout element.")
+
+
+class Layout(QtCore.QObject):
+    """Wrap a pylayout.layout object."""
+
+    def __init__(self, gui=True):
         """
-        :param drawing: a pylayout.drawing instance.
+        Create a new LayoutEditor instance.
+
+        :param gui: if True, the splash screen and LayoutEditor window will appear, as usual; if False, neither window
+            will appear, but editing using this module will still work.
+        """
+        super(Layout, self).__init__()
+        if gui:  # The application doesn't work unless GUIenabled=True, but we can simply not show it
+            self.app = QtGui.QApplication([], True)
+            self.app.quitOnLastWindowClosed = True
+            splashscreen = pylayout.splash(QtGui.QPixmap(":/splash"))
+            splashscreen.show()
+            self.pyl = pylayout.project.newLayout()
+            splashscreen.finish(self.pyl)
+            self.pyl.show()
+        else:
+            self.app = QtGui.QApplication([], True)
+            self.pyl = pylayout.project.newLayout()
+
+    def show_latest(self):
+        self.pyl.drawing.currentCell = self.pyl.drawing.firstCell.thisCell
+        self.pyl.guiUpdate()
+        self.pyl.drawing.scaleFull()
+
+    def drawing(self, use_user_unit=True, auto_number=False):
+        return Drawing(self.pyl.drawing, use_user_unit=use_user_unit, auto_number=auto_number)
+
+
+class Drawing(object):
+    """Wrap a pylayout.drawingField object."""
+
+    def __init__(self, pyl_drawing, use_user_unit=True, auto_number=False):
+        """
+        :param pyl_drawing: a pylayout.drawingField instance.
         :param use_user_unit: a boolean that determines whether all values input to and returned from classes in this
         module are expected to be in user units or database units. All of the pylayout classes expect and return
         integer database units.
+        :param auto_number: a boolean -- if True, the add_cell() method  will append an integer to the names of all
+            cells it creates in this drawing.
         :return: a Drawing instance.
         """
-        self.pl_drawing = pl_drawing
+        self.pyl = pyl_drawing
         self.use_user_unit = use_user_unit
         self.auto_number = auto_number
         if auto_number:
@@ -66,11 +127,11 @@ class Drawing(object):
         """
         :return: the database unit in meters.
         """
-        return self.pl_drawing.databaseunits
+        return self.pyl.databaseunits
 
     @database_unit.setter
     def database_unit(self, unit):
-        self.pl_drawing.databaseunits = unit
+        self.pyl.databaseunits = unit
 
     @property
     def user_unit(self):
@@ -78,11 +139,11 @@ class Drawing(object):
         This is the ratio of the database unit to the user unit. All points are saved as integer values in database
         units, so this number is the data resolution in user units.
         """
-        return self.pl_drawing.userunits
+        return self.pyl.userunits
 
     @user_unit.setter
     def user_unit(self, unit):
-        self.pl_drawing.userunits = unit
+        self.pyl.userunits = unit
 
     def to_database_units(self, value_or_array):
         """
@@ -128,7 +189,7 @@ class Drawing(object):
         """
         n_cells = 0
         cell_dict = OrderedDict()
-        current = self.pl_drawing.firstCell
+        current = self.pyl.firstCell
         while current is not None:
             cell = Cell(current.thisCell, self)
             cell_dict[cell.name] = cell
@@ -164,31 +225,44 @@ class Drawing(object):
         return array_list
 
     def add_cell(self, name):
+        """
+        Return a new Cell object that wraps a pylayout.cell object.
+
+        If self.auto_number is True, the string '_x' will be appended to the given cell name, where x is the number of
+        cells that have been created so far by this class. This allows code to repeatedly call this method with the same
+        name string without producing an error, since the appended number guarantees that their names will be unique.
+
+        :param name: a string that is the name of the new cell.
+        :return: a Cell object.
+        """
         if self.auto_number:
             name = '{}_{}'.format(name, self._cell_number)
             self._cell_number += 1
-        pl_cell = self.pl_drawing.addCell().thisCell
-        pl_cell.cellName = name
+        pyl_cell = self.pyl.addCell().thisCell
+        pyl_cell.cellName = name
         # Adding a cell does not update currentCell. Without the line below, boolean operations (and probably others)
         #  will operate on currentCell instead of the cell created by this method.
-        self.pl_drawing.currentCell = pl_cell
-        return Cell(pl_cell, self)
+        # ToDo: this may no longer be necessary
+        self.pyl.currentCell = pyl_cell
+        return Cell(pyl_cell, self)
 
 
 class Cell(object):
-    def __init__(self, cell, drawing):
-        self.pl_cell = cell
+    """Wrap a pylayout.cell object."""
+
+    def __init__(self, pyl_cell, drawing):
+        self.pyl = pyl_cell
         self.drawing = drawing
 
     @property
     def name(self):
-        return self.pl_cell.cellName.toAscii().data()
+        return self.pyl.cellName.toAscii().data()
 
     @name.setter
     def name(self, name):
         if name != self.name and name in self.drawing.cells:
             raise ValueError("Cell name already exists.")
-        self.pl_cell.cellName = str(name)
+        self.pyl.cellName = str(name)
 
     @property
     def elements(self):
@@ -202,7 +276,7 @@ class Cell(object):
         :return: a list of Element objects in this Cell.
         """
         element_list = []
-        current = self.pl_cell.firstElement
+        current = self.pyl.firstElement
         while current is not None:
             element_list.append(instantiate_element(current.thisElement, self.drawing))
             current = current.nextElement
@@ -223,12 +297,12 @@ class Cell(object):
         :param delete: if True, delete all structures on the positive and negative layers after the subtraction.
         :return: None
         """
-        self.drawing.pl_drawing.setCell(self.pl_cell)
-        bh = pylayout.booleanHandler(self.drawing.pl_drawing)
+        self.drawing.pyl.setCell(self.pyl)
+        bh = pylayout.booleanHandler(self.drawing.pyl)
         bh.boolOnLayer(positive_layer, negative_layer, result_layer, pylayout.string('A-B'), 0, 0, 0)
         if delete:
-            self.drawing.pl_drawing.deleteLayer(positive_layer)
-            self.drawing.pl_drawing.deleteLayer(negative_layer)
+            self.drawing.pyl.deleteLayer(positive_layer)
+            self.drawing.pyl.deleteLayer(negative_layer)
 
     def add_cell(self, cell, origin, angle=0):
         """
@@ -239,8 +313,8 @@ class Cell(object):
         :param angle: a float representing the cell orientation in degrees.
         :return: a Cellref object with a reference to the given Cell.
         """
-        pl_cell = self.pl_cell.addCellref(cell.pl_cell, self.drawing._np_to_pyqt(to_point(origin)))
-        cell = Cellref(pl_cell, self.drawing)
+        pyl_cell = self.pyl.addCellref(cell.pyl, self.drawing._np_to_pyqt(to_point(origin)))
+        cell = Cellref(pyl_cell, self.drawing)
         cell.angle = angle
         return cell
 
@@ -261,12 +335,12 @@ class Cell(object):
         repeat_y = int(repeat_y)
         # Strange but true: the constructor for this object expects three points that are different from both the
         # points returned by getPoints() and the GUI interface points.
-        pl_origin = to_point(origin)
-        pl_total_x = repeat_x * to_point(step_x) + pl_origin
-        pl_total_y = repeat_y * to_point(step_y) + pl_origin
-        point_array = self.drawing._to_point_array([pl_origin, pl_total_x, pl_total_y])
-        pl_cell_array = self.pl_cell.addCellrefArray(cell.pl_cell, point_array, repeat_x, repeat_y)
-        cell_array = CellrefArray(pl_cell_array, self.drawing)
+        pyl_origin = to_point(origin)
+        pyl_total_x = repeat_x * to_point(step_x) + pyl_origin
+        pyl_total_y = repeat_y * to_point(step_y) + pyl_origin
+        point_array = self.drawing._to_point_array([pyl_origin, pyl_total_x, pyl_total_y])
+        pyl_cell_array = self.pyl.addCellrefArray(cell.pyl, point_array, repeat_x, repeat_y)
+        cell_array = CellrefArray(pyl_cell_array, self.drawing)
         cell_array.angle = angle
         return cell_array
 
@@ -281,12 +355,12 @@ class Cell(object):
         :param layer: the layer on which the box is created.
         :return: a Box object.
         """
-        pl_box = self.pl_cell.addBox(self.drawing.to_database_units(x),
-                                     self.drawing.to_database_units(y),
-                                     self.drawing.to_database_units(width),
-                                     self.drawing.to_database_units(height),
-                                     int(layer))
-        return Box(pl_box, self.drawing)
+        pyl_box = self.pyl.addBox(self.drawing.to_database_units(x),
+                                  self.drawing.to_database_units(y),
+                                  self.drawing.to_database_units(width),
+                                  self.drawing.to_database_units(height),
+                                  int(layer))
+        return Box(pyl_box, self.drawing)
 
     def add_circle(self, origin, radius, layer, number_of_points=0):
         """
@@ -300,9 +374,9 @@ class Cell(object):
         current pylayout default.
         :return: a Circle object.
         """
-        pl_circle = self.pl_cell.addCircle(int(layer), self.drawing._np_to_pyqt(to_point(origin)),
-                                           self.drawing.to_database_units(radius), int(number_of_points))
-        return Circle(pl_circle, self.drawing)
+        pyl_circle = self.pyl.addCircle(int(layer), self.drawing._np_to_pyqt(to_point(origin)),
+                                       self.drawing.to_database_units(radius), int(number_of_points))
+        return Circle(pyl_circle, self.drawing)
 
     def add_polygon(self, points, layer):
         """
@@ -313,8 +387,8 @@ class Cell(object):
         :param layer: the layer on which the polygon is created.
         :return: a Polygon object.
         """
-        pl_polygon = self.pl_cell.addPolygon(self.drawing._to_point_array(points), int(layer))
-        return Polygon(pl_polygon, self.drawing)
+        pyl_polygon = self.pyl.addPolygon(self.drawing._to_point_array(points), int(layer))
+        return Polygon(pyl_polygon, self.drawing)
 
     def add_polygon_arc(self, center, inner_radius, outer_radius, layer, start_angle=0, stop_angle=0):
         """
@@ -330,11 +404,11 @@ class Cell(object):
         :param stop_angle: the stop angle, measured counterclockwise from the x-axis.
         :return: a Polygon object.
         """
-        pl_polygon = self.pl_cell.addPolygonArc(self.drawing._np_to_pyqt(to_point(center)),
-                                                self.drawing.to_database_units(inner_radius),
-                                                self.drawing.to_database_units(outer_radius),
-                                                float(start_angle), float(stop_angle), int(layer))
-        return Polygon(pl_polygon, self.drawing)
+        pyl_polygon = self.pyl.addPolygonArc(self.drawing._np_to_pyqt(to_point(center)),
+                                             self.drawing.to_database_units(inner_radius),
+                                             self.drawing.to_database_units(outer_radius),
+                                             float(start_angle), float(stop_angle), int(layer))
+        return Polygon(pyl_polygon, self.drawing)
 
     def add_path(self, points, layer, width=None, cap=None):
         """
@@ -346,8 +420,8 @@ class Cell(object):
         :param cap: the cap style of the path; the default of None will create a path with the current default cap.
         :return: a Path object.
         """
-        pl_path = self.pl_cell.addPath(self.drawing._to_point_array(points), int(layer))
-        path = Path(pl_path, self.drawing)
+        pyl_path = self.pyl.addPath(self.drawing._to_point_array(points), int(layer))
+        path = Path(pyl_path, self.drawing)
         if width is not None:
             path.width = float(width)
         if cap is not None:
@@ -366,58 +440,49 @@ class Cell(object):
         a fixed height in pixels, and the default uses the current default.
         :return: a Text object.
         """
-        pl_text = self.pl_cell.addText(int(layer), self.drawing._np_to_pyqt(to_point(origin)),
-                                       str(text))
-        text_ = Text(pl_text, self.drawing)
+        pyl_text = self.pyl.addText(int(layer), self.drawing._np_to_pyqt(to_point(origin)), str(text))
+        text_ = Text(pyl_text, self.drawing)
         if height is not None:
             text_.height = height
         return text_
 
 
-def instantiate_element(pl_element, drawing):
-    elements = (Box, Cellref, CellrefArray, Circle, Path, Polygon, Text)
-    for element in elements:
-        if getattr(pl_element, 'is' + element.__name__)():
-            return element(pl_element, drawing)
-    raise ValueError("Unknown pylayout element.")
-
-
-# TODO: think about using a reference to the parent cell instead of to the drawing.
 class Element(object):
-    def __init__(self, pl_element, drawing):
-        self.pl_element = pl_element
+
+    def __init__(self, pyl_element, drawing):
+        self.pyl = pyl_element
         self.drawing = drawing
 
     @property
     def points(self):
-        return self.drawing._to_list_of_np_arrays(self.pl_element.getPoints())
+        return self.drawing._to_list_of_np_arrays(self.pyl.getPoints())
 
     @points.setter
     def points(self, points):
-        self.pl_element.setPoints(self.drawing._to_point_array(points))
+        self.pyl.setPoints(self.drawing._to_point_array(points))
 
     @property
     def data_type(self):
-        return self.pl_element.getDatatype()
+        return self.pyl.getDatatype()
 
     @data_type.setter
     def data_type(self, data_type):
-        self.pl_element.setDatatype(int(data_type))
+        self.pyl.setDatatype(int(data_type))
 
     def __str__(self):
         return '{} {}'.format(self.__class__.__name__, self.points)
 
     @property
     def angle(self):
-        return self.pl_element.getTrans().getAngle()
+        return self.pyl.getTrans().getAngle()
 
     @angle.setter
     def angle(self, angle):
-        transformation = self.pl_element.getTrans()
+        transformation = self.pyl.getTrans()
         # Bizarrely, strans.rotate(angle) rotates by -angle; these lines rotate to zero then to the desired angle.
         transformation.rotate(transformation.getAngle())
         transformation.rotate(-angle)
-        self.pl_element.setTrans(transformation)
+        self.pyl.setTrans(transformation)
 
     @property
     def scale(self):
@@ -425,29 +490,29 @@ class Element(object):
         The scale of the transformation. The returned value is always positive. However, setting a negative scale will
         produce a rotation by 180 degrees along with a scaling by the absolute value of the given scale.
         """
-        return self.pl_element.getTrans().getScale()
+        return self.pyl.getTrans().getScale()
 
     @scale.setter
     def scale(self, scale):
-        transformation = self.pl_element.getTrans()
+        transformation = self.pyl.getTrans()
         transformation.scale(scale / transformation.getScale())
-        self.pl_element.setTrans(transformation)
+        self.pyl.setTrans(transformation)
 
     @property
     def mirror_x(self):
-        return self.pl_element.getTrans().getMirror_x()
+        return self.pyl.getTrans().getMirror_x()
 
     @mirror_x.setter
     def mirror_x(self, mirror):
-        transformation = self.pl_element.getTrans()
+        transformation = self.pyl.getTrans()
         if bool(mirror) ^ transformation.getMirror_x():
             transformation.toggleMirror_x()
-        self.pl_element.setTrans(transformation)
+        self.pyl.setTrans(transformation)
 
     def reset_transformation(self):
-        transformation = self.pl_element.getTrans()
+        transformation = self.pyl.getTrans()
         transformation.reset()
-        self.pl_element.setTrans(transformation)
+        self.pyl.setTrans(transformation)
 
 
 class LayerElement(Element):
@@ -458,20 +523,25 @@ class LayerElement(Element):
 
     @property
     def layer(self):
-        return self.pl_element.layerNum
+        return self.pyl.layerNum
 
     @layer.setter
     def layer(self, layer):
-        self.pl_element.layerNum = int(layer)
+        self.pyl.layerNum = int(layer)
 
 
 class CellElement(Element):
-    def __init__(self, pl_element, drawing):
-        super(CellElement, self).__init__(pl_element, drawing)
-        self.cell = Cell(pl_element.depend(), drawing)
+    """
+    This class adds a cell attribute to Element.
+    """
+
+    def __init__(self, pyl_element, drawing):
+        super(CellElement, self).__init__(pyl_element, drawing)
+        self.cell = Cell(pyl_element.depend(), drawing)
 
 
 class Cellref(CellElement):
+
     def __str__(self):
         return 'Cell {} at ({:.3f}, {:.3f})'.format(self.cell.name, self.origin[0], self.origin[1])
 
@@ -484,28 +554,28 @@ class Cellref(CellElement):
         self.points = [to_point(origin)]
 
 
-# TODO: should these class methods be static methods?
 class CellrefArray(CellElement):
+
     def __str__(self):
         return 'Cell {}: {} {} by {}'.format(self.cell.name, self.points, self.repeat_x, self.repeat_y)
 
-    @classmethod
-    def _to_pylayout(cls, points):
+    @staticmethod
+    def _to_pylayout(points):
         origin, step_x, step_y = points
         return [origin, step_x + origin, step_y + origin]
 
-    @classmethod
-    def _from_pylayout(cls, points):
-        origin, pl_x, pl_y = points
-        return [origin, pl_x - origin, pl_y - origin]
+    @staticmethod
+    def _from_pylayout(points):
+        origin, pyl_x, pyl_y = points
+        return [origin, pyl_x - origin, pyl_y - origin]
 
     @property
     def points(self):
-        return self._from_pylayout(self.drawing._to_list_of_np_arrays(self.pl_element.getPoints()))
-
+        return self._from_pylayout(self.drawing._to_list_of_np_arrays(self.pyl.getPoints()))
+    
     @points.setter
     def points(self, points):
-        self.pl_element.setPoints(self.drawing._to_point_array(self._to_pylayout(points)))
+        self.pyl.setPoints(self.drawing._to_point_array(self._to_pylayout(points)))
 
     @property
     def origin(self):
@@ -533,22 +603,23 @@ class CellrefArray(CellElement):
 
     @property
     def repeat_x(self):
-        return self.pl_element.getNx()
+        return self.pyl.getNx()
 
     @repeat_x.setter
     def repeat_x(self, repeat):
-        self.pl_element.setNx(int(repeat))
+        self.pyl.setNx(int(repeat))
 
     @property
     def repeat_y(self):
-        return self.pl_element.getNy()
+        return self.pyl.getNy()
 
     @repeat_y.setter
     def repeat_y(self, repeat):
-        self.pl_element.setNy(int(repeat))
+        self.pyl.setNy(int(repeat))
 
 
 class Box(LayerElement):
+
     @property
     def _points(self):
         (x_upper_left, y_upper_left), (x_lower_right, y_lower_right) = self.points
@@ -593,21 +664,22 @@ class Circle(LayerElement):
 
 
 class Path(LayerElement):
+
     @property
     def width(self):
-        return self.pl_element.getWidth()
+        return self.pyl.getWidth()
 
     @width.setter
     def width(self, width):
-        self.pl_element.setWidth(self.drawing.to_database_units(width))
+        self.pyl.setWidth(self.drawing.to_database_units(width))
 
     @property
     def cap(self):
-        return self.pl_element.getCap()
+        return self.pyl.getCap()
 
     @cap.setter
     def cap(self, cap):
-        self.pl_element.setCap(int(cap))
+        self.pyl.setCap(int(cap))
 
 
 class Polygon(LayerElement):
@@ -615,24 +687,25 @@ class Polygon(LayerElement):
 
 
 class Text(LayerElement):
+
     def __str__(self):
         return 'Text "{}" at ({:.3f}, {:.3f})'.format(self.text, self.origin[0], self.origin[1])
 
     @property
     def text(self):
-        return self.pl_element.getName().toAscii().data()
+        return self.pyl.getName().toAscii().data()
 
     @text.setter
     def text(self, text):
-        self.pl_element.setName(text)
+        self.pyl.setName(text)
 
     @property
     def height(self):
-        return self.drawing.from_database_units(self.pl_element.getWidth())
+        return self.drawing.from_database_units(self.pyl.getWidth())
 
     @height.setter
     def height(self, height):
-        self.pl_element.setWidth(self.drawing.to_database_units(height))
+        self.pyl.setWidth(self.drawing.to_database_units(height))
 
     @property
     def origin(self):

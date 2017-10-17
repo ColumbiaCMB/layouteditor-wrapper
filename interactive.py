@@ -1,4 +1,4 @@
-from layouteditor import wrapper
+from layouteditorwrapper import wrapper
 
 
 def main():

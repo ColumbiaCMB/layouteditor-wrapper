@@ -645,6 +645,10 @@ class Box(LayerElement):
     def height(self):
         return self._points[3]
 
+    @property
+    def perimeter(self):
+        return 2 * self.width + 2 * self.height
+
 
 class Circle(LayerElement):
     """
@@ -661,6 +665,18 @@ class Circle(LayerElement):
     @property
     def radius(self):
         return np.sqrt(np.sum((self.points[0] - self.center) ** 2))
+
+    @property
+    def perimeter(self):
+        """
+        Return the perimeter in user units.
+
+        For a Polygon the first and last point are always the same.
+
+        :return: the perimeter calculated from the element points
+        """
+        x, y = np.vstack(self.points).T
+        return np.sum(np.hypot(np.diff(x), np.diff(y)))
 
 
 class Path(LayerElement):
@@ -681,9 +697,30 @@ class Path(LayerElement):
     def cap(self, cap):
         self.pyl.setCap(int(cap))
 
+    @property
+    def length(self):
+        """
+        Return the length of the path in user units, not including the caps.
+
+        :return: the path length
+        """
+        x, y = np.vstack(self.points).T
+        return np.sum(np.hypot(np.diff(x), np.diff(y)))
+
 
 class Polygon(LayerElement):
-    pass
+
+    @property
+    def perimeter(self):
+        """
+        Return the perimeter in user units.
+
+        For a Polygon the first and last point are always the same.
+
+        :return: the perimeter calculated from the element points
+        """
+        x, y = np.vstack(self.points).T
+        return np.sum(np.hypot(np.diff(x), np.diff(y)))
 
 
 class Text(LayerElement):

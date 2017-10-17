@@ -1,4 +1,4 @@
-# layouteditor
+# layouteditor-wrapper
 
 A wrapper for pylayout, the Python module for Juspertor LayoutEditor.
 

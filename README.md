@@ -1,15 +1,18 @@
 # layouteditor-wrapper
 
-A wrapper for pylayout, the Python module for Juspertor LayoutEditor.
+A wrapper for pylayout, the Python module for Juspertor LayoutEditor. It is not endorsed in any way by Juspertor.
 
-It includes
+The package will be installed as `layouteditorwrapper`. It includes
  
-- `wrapper.py`, which contains wrapper classes for the pylayout objects
+- `wrapper.py`, which contains wrapper classes for the pylayout objects.
 
-- `interactive.py`, which is a template script that starts LayoutEditor and can be extended to draw layouts.
+- `path.py`, which contains classes and functions useful for drawing co-planar waveguide components. 
 
-- `components.py`, which contains a few example functions that create components that are useful to our work.
+- `components.py`, which contains a few example functions that create useful components.
 
+There is also a template script `interactive.py` that starts LayoutEditor:
+`$ ipython -i interactive.py`
+This script can be used as a template to create layouts entirely in code.
 
 ## Imports
 

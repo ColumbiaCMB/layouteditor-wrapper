@@ -19,17 +19,17 @@ In method docstrings the word *point* refers to a point with two coordinates. Th
 (2,) internally, but methods should accept anything that allows point[0] and point[1] to be indexed, such as a tuple.
 """
 from __future__ import division
+import os
 import sys
 from collections import OrderedDict
 
 import numpy as np
-# These shenanigans ensure that the bundled PyQt4 and sip are imported instead of any newer versions.
-# For this to work, the distributed pylayout directory should be available on the PYTHONPATH as pylayout and must be
-# made into a valid package by adding an __init__.py file.
+# The pylayout.so object is built using specific versions of PyQt4 and sip, and these versions must be importable when
+# pylayout is imported for it to run. The path shenanigans below ensure that this occurs, while resetting sys.path to
+# its initial state after the necessary imports. See README.md for installation instructions.
 import pylayout
-sys.path.insert(0, pylayout.__path__[0])
+sys.path.insert(0, os.path.dirname(pylayout.__file__))
 from PyQt4 import QtCore, QtGui
-from pylayout import pylayout
 sys.path.pop(0)
 
 # The two following simple functions are available to code that uses (lists of) numpy arrays as points.
